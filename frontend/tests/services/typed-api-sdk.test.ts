@@ -143,7 +143,7 @@ describe('ApiClient — auth propagation', () => {
     const client = new ApiClient({ sessionStore: makeSessionStore('my-token') });
     await client.playGame({ gameId: 'game-1' });
 
-    const calledHeaders = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]?.headers as Record<string, string>;
+    const calledHeaders = (global.fetch as any).mock.calls[0][1]?.headers as Record<string, string>;
     expect(calledHeaders['Authorization']).toBe('Bearer my-token');
   });
 

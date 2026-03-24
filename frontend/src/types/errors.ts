@@ -33,6 +33,7 @@ export const ErrorSeverity = {
   USER_ACTIONABLE: 'user_actionable',
   /** Non-recoverable — no retry or user action will resolve it. */
   TERMINAL: 'terminal',
+  FATAL: 'fatal',
 } as const;
 
 export type ErrorSeverity = (typeof ErrorSeverity)[keyof typeof ErrorSeverity];

@@ -29,8 +29,11 @@ interface MockRoute {
  * Unmatched requests return 501 Not Implemented.
  */
 function installMockServer(routes: MockRoute[]): void {
-  global.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-    const method = (init?.method ?? 'GET').toUpperCase();
+  global.fetch = fetchSpy = vi.fn((input, init) => {
+    const url = typeof input === 'string' ? input : (input as Request).url;
+    const method = (
+      (typeof input === 'string' ? init?.method : (input as Request).method) ?? 'GET'
+    ).toUpperCase();
     const match = routes.find(
       (r) => r.method.toUpperCase() === method && url.endsWith(r.path),
     );
@@ -171,7 +174,7 @@ describe('Integration — users domain', () => {
     if (!result.success) {
       expect(result.error.code).toBe('API_SERVER_ERROR');
     }
-  }, 20_000);
+  }, { timeout: 20_000 });
 });
 
 // ── Wallet domain ─────────────────────────────────────────────────────────────

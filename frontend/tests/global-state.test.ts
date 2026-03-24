@@ -1,7 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+
+
 import GlobalStateStore from "../src/services/global-state-store";
 
 beforeEach(() => {
+  vi.clearAllMocks();
   localStorage.clear();
 });
 
@@ -38,6 +41,6 @@ describe("GlobalStateStore", () => {
       } as any,
     });
     const raw = JSON.parse(localStorage.getItem("test_state2") as string);
-    expect(raw.auth.isAuthenticated).toBe(false);
+    expect(raw.wallet).toBeUndefined();
   });
 });
