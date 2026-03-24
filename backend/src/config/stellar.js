@@ -1,6 +1,5 @@
 const StellarSdk = require('@stellar/stellar-sdk');
-const logger = require('./logger'); // Changed _logger to logger as it's used
-const _gameService = require('../services/game.service'); // Added this line
+const logger = require('./logger');
 
 /**
  * Configure Stellar Server instance based on environment.
@@ -8,6 +7,32 @@ const _gameService = require('../services/game.service'); // Added this line
 const network = process.env.STELLAR_NETWORK || 'testnet';
 const horizonUrl = process.env.HORIZON_URL || 'https://horizon-testnet.stellar.org';
 
+/**
+ * Resolve the network passphrase from env or derive from known network name.
+ */
+const resolvePassphrase = () => {
+  if (process.env.NETWORK_PASSPHRASE) {
+    return process.env.NETWORK_PASSPHRASE;
+  }
+  const passphraseMap = {
+    testnet: StellarSdk.Networks.TESTNET,
+    public: StellarSdk.Networks.PUBLIC,
+    mainnet: StellarSdk.Networks.PUBLIC,
+    futurenet: StellarSdk.Networks.FUTURENET,
+    sandbox: StellarSdk.Networks.SANDBOX,
+    standalone: StellarSdk.Networks.STANDALONE,
+  };
+  const resolved = passphraseMap[network.toLowerCase()];
+  if (!resolved) {
+    logger.warn(
+      `Unknown STELLAR_NETWORK "${network}", defaulting to TESTNET passphrase`
+    );
+    return StellarSdk.Networks.TESTNET;
+  }
+  return resolved;
+};
+
+const passphrase = resolvePassphrase();
 const server = new StellarSdk.Horizon.Server(horizonUrl);
 
 logger.info(`Stellar SDK initialized for ${network} at ${horizonUrl}`);
@@ -30,6 +55,6 @@ const getContractClient = (contractId) => {
 module.exports = {
   server,
   network,
-  passphrase: process.env.NETWORK_PASSPHRASE,
+  passphrase,
   getContractClient,
 };
