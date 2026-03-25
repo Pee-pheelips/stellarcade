@@ -121,13 +121,3 @@ pub fn is_paused_internal(env: &Env) -> bool
 
 `bool`
 
-## Data Structures
-
-### `PauseMetadata`
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `reason_code` | `u32` | Code representing the reason for pausing. |
-| `timestamp` | `u64` | Ledger timestamp when the pause was initiated. |
-| `admin` | `Address` | The admin address that triggered the pause. |
-
