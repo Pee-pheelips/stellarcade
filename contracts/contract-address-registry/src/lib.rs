@@ -343,10 +343,21 @@ impl ContractAddressRegistry {
         Ok(())
     }
 
-    /// performs a validation report of the registry.
+    /// Performs a validation report of the registry.
+    ///
+    /// Flags missing required contracts, duplicate addresses across different aliases,
+    /// and placeholder records.
     ///
     /// # Returns
-    /// A structured report flagging missing, duplicate, or placeholder records.
+    /// A structured report (`ValidationReport`) flagging:
+    /// - **Missing**: Required core contracts (e.g., `prize-pool`) not registered.
+    /// - **Duplicate**: Multiple aliases pointing to the identical address.
+    /// - **Placeholder**: Address matches the zero-address placeholder (`CAAA...`).
+    ///
+    /// # Operator Guidance
+    /// - **Missing** records: Deploy the missing contract and register it.
+    /// - **Duplicate** records: Investigate alias misconfigurations.
+    /// - **Placeholder** records: Replace with real addresses before production use.
     pub fn validation_report(env: Env) -> Result<ValidationReport, Error> {
         Self::require_initialized(&env)?;
 

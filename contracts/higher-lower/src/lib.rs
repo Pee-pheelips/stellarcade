@@ -289,11 +289,16 @@ impl HigherLower {
     /// Callable by anyone. On success the wager is refunded to the player and
     /// the round is transitioned to the terminal `expired` state.
     ///
+    /// # Expiry Model
+    /// - Threshold: `ROUND_EXPIRY_LEDGERS = 17_280` ledgers (≈24 h at 5 s/ledger).
+    /// - A `RoundExpired` event is emitted on success, recording `game_id`, `player`, and `refund` amount.
+    /// - Resolved or already-expired rounds are never re-targeted.
+    ///
     /// # Errors
     /// * `NotInitialized` - Registry not initialised.
     /// * `GameNotFound`   - No round stored under this ID.
     /// * `AlreadyResolved` - Round was already properly resolved.
-    /// * `GameExpired`   - Round was already cleaned up.
+    /// * `GameExpired`   - Round was already cleaned up via `expire_round`.
     /// * `NotExpired`    - Threshold not yet reached; round is still active.
     pub fn expire_round(env: Env, game_id: u64) -> Result<(), Error> {
         require_initialized(&env)?;
@@ -396,7 +401,50 @@ mod test {
         token::StellarAssetClient,
         Address, Env,
     };
-    use stellarcade_user_balance::{UserBalance, UserBalanceClient};
+    // -----------------------------
+    // Mock Balance contract
+    // -----------------------------
+
+    #[contract]
+    pub struct MockBalance;
+
+    #[contracttype]
+    pub enum BalanceKey {
+        Balance(Address),
+    }
+
+    #[contractimpl]
+    impl MockBalance {
+        pub fn init(_env: Env, _admin: Address, _token: Address) {}
+        pub fn authorize_game(_env: Env, _admin: Address, _game: Address) {}
+
+        pub fn deposit(env: Env, user: Address, amount: i128) {
+            let key = BalanceKey::Balance(user.clone());
+            let balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+            env.storage().persistent().set(&key, &(balance + amount));
+        }
+
+        pub fn withdraw(env: Env, user: Address, amount: i128) {
+            let key = BalanceKey::Balance(user.clone());
+            let balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+            env.storage().persistent().set(&key, &(balance - amount));
+        }
+
+        pub fn debit(env: Env, _game: Address, user: Address, amount: i128, _reason: Symbol) {
+            Self::withdraw(env, user, amount);
+        }
+
+        pub fn credit(env: Env, _game: Address, user: Address, amount: i128, _reason: Symbol) {
+            Self::deposit(env, user, amount);
+        }
+
+        pub fn balance_of(env: Env, user: Address) -> i128 {
+            env.storage()
+                .persistent()
+                .get(&BalanceKey::Balance(user))
+                .unwrap_or(0)
+        }
+    }
 
     // -----------------------------
     // Mock RNG contract
@@ -446,7 +494,7 @@ mod test {
         Address, // admin
         Address, // player
         Address, // house
-        UserBalanceClient<'_>,
+        MockBalanceClient<'_>,
         MockRngClient<'_>,
     ) {
         env.mock_all_auths();
@@ -457,8 +505,8 @@ mod test {
 
         let (token_addr, token_sac) = create_token(env, &token_admin);
 
-        let balance_id = env.register(UserBalance, ());
-        let balance_client = UserBalanceClient::new(env, &balance_id);
+        let balance_id = env.register(MockBalance, ());
+        let balance_client = MockBalanceClient::new(env, &balance_id);
         balance_client.init(&admin, &token_addr);
 
         let rng_id = env.register(MockRng, ());
