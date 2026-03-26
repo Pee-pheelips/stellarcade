@@ -17,6 +17,9 @@ use soroban_sdk::{
 pub const MIN_WAGER: i128 = 1;
 pub const MAX_WAGER: i128 = 1_000_000_000;
 pub const ANCHOR_VALUE: u32 = 50;
+/// Ledgers a round may stay unresolved before it is eligible for cleanup.
+/// ~24 hours at ~5 s/ledger.
+pub const ROUND_EXPIRY_LEDGERS: u32 = 17_280;
 
 // ---------------------------------------------------------------------------
 // External contract clients
@@ -55,6 +58,10 @@ pub enum Error {
     InsufficientBalance = 10,
     HouseInsufficientFunds = 11,
     Overflow = 12,
+    /// Cleanup called before the expiry threshold has been reached.
+    NotExpired = 13,
+    /// Attempt to resolve or interact with an already-expired game.
+    GameExpired = 14,
 }
 
 // ---------------------------------------------------------------------------
@@ -75,9 +82,12 @@ pub struct GameData {
     pub prediction: Prediction,
     pub wager: i128,
     pub resolved: bool,
+    pub expired: bool,
     pub outcome: u32,
     pub win: bool,
     pub payout: i128,
+    /// Ledger sequence at which the round was opened.
+    pub created_at: u32,
 }
 
 #[contracttype]
@@ -109,6 +119,15 @@ pub struct GameResolved {
     pub outcome: u32,
     pub win: bool,
     pub payout: i128,
+}
+
+#[contractevent]
+pub struct RoundExpired {
+    #[topic]
+    pub game_id: u64,
+    pub player: Address,
+    /// Wager amount refunded to the player.
+    pub refund: i128,
 }
 
 // ---------------------------------------------------------------------------
@@ -179,9 +198,11 @@ impl HigherLower {
             prediction,
             wager,
             resolved: false,
+            expired: false,
             outcome: 0,
             win: false,
             payout: 0,
+            created_at: env.ledger().sequence(),
         };
         env.storage().persistent().set(&key, &game);
 
@@ -208,6 +229,10 @@ impl HigherLower {
 
         if game.resolved {
             return Err(Error::AlreadyResolved);
+        }
+
+        if game.expired {
+            return Err(Error::GameExpired);
         }
 
         let rng_contract = get_rng_contract(&env)?;
@@ -253,6 +278,60 @@ impl HigherLower {
             outcome,
             win,
             payout,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Expires a stale round that has not been resolved within `ROUND_EXPIRY_LEDGERS`.
+    ///
+    /// Callable by anyone. On success the wager is refunded to the player and
+    /// the round is transitioned to the terminal `expired` state.
+    ///
+    /// # Errors
+    /// * `NotInitialized` - Registry not initialised.
+    /// * `GameNotFound`   - No round stored under this ID.
+    /// * `AlreadyResolved` - Round was already properly resolved.
+    /// * `GameExpired`   - Round was already cleaned up.
+    /// * `NotExpired`    - Threshold not yet reached; round is still active.
+    pub fn expire_round(env: Env, game_id: u64) -> Result<(), Error> {
+        require_initialized(&env)?;
+
+        let key = DataKey::Game(game_id);
+        let mut game: GameData = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::GameNotFound)?;
+
+        if game.resolved {
+            return Err(Error::AlreadyResolved);
+        }
+
+        if game.expired {
+            return Err(Error::GameExpired);
+        }
+
+        let current_ledger = env.ledger().sequence();
+        if current_ledger < game.created_at.saturating_add(ROUND_EXPIRY_LEDGERS) {
+            return Err(Error::NotExpired);
+        }
+
+        // Refund the escrowed wager back to the player.
+        let balance_contract = get_balance_contract(&env)?;
+        let game_addr = env.current_contract_address();
+        let balance_client = BalanceClient::new(&env, &balance_contract);
+        balance_client.debit(&game_addr, &game_addr, &game.wager, &symbol_short!("expiry"));
+        balance_client.credit(&game_addr, &game.player, &game.wager, &symbol_short!("refund"));
+
+        game.expired = true;
+        env.storage().persistent().set(&key, &game);
+
+        RoundExpired {
+            game_id,
+            player: game.player,
+            refund: game.wager,
         }
         .publish(&env);
 
@@ -312,7 +391,9 @@ fn get_balance_contract(env: &Env) -> Result<Address, Error> {
 mod test {
     use super::*;
     use soroban_sdk::{
-        contract, contractimpl, contracttype, testutils::Address as _, token::StellarAssetClient,
+        contract, contractimpl, contracttype,
+        testutils::{Address as _, Ledger},
+        token::StellarAssetClient,
         Address, Env,
     };
     use stellarcade_user_balance::{UserBalance, UserBalanceClient};
@@ -505,6 +586,64 @@ mod test {
 
         client.place_prediction(&player, &1, &100, &7);
         let result = client.try_resolve_game(&7);
+        assert!(result.is_err());
+    }
+
+    // ── Stale Round Cleanup Tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_cleanup_rejected_before_expiry() {
+        let env = Env::default();
+        let (client, _admin, player, _house, _balance, _rng) = setup(&env);
+
+        // Round placed at ledger 0 (default).  Threshold is ROUND_EXPIRY_LEDGERS = 17_280.
+        client.place_prediction(&player, &0, &100, &10);
+
+        // Advance to just below the threshold.
+        env.ledger().with_mut(|l| l.sequence_number = ROUND_EXPIRY_LEDGERS - 1);
+
+        let result = client.try_expire_round(&10);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_stale_round_cleanup_success() {
+        let env = Env::default();
+        let (client, _admin, player, house, balance, _rng) = setup(&env);
+
+        client.place_prediction(&player, &0, &100, &11);
+
+        // Player's wager is escrowed: player 900, house 5100.
+        assert_eq!(balance.balance_of(&player), 900);
+        assert_eq!(balance.balance_of(&house), 5_100);
+
+        // Advance past expiry threshold.
+        env.ledger().with_mut(|l| l.sequence_number = ROUND_EXPIRY_LEDGERS + 1);
+
+        client.expire_round(&11);
+
+        let game = client.get_game(&11).unwrap();
+        assert!(game.expired);
+        assert!(!game.resolved);
+
+        // Wager refunded: player back to 1000, house back to 5000.
+        assert_eq!(balance.balance_of(&player), 1_000);
+        assert_eq!(balance.balance_of(&house), 5_000);
+    }
+
+    #[test]
+    fn test_repeat_cleanup_rejected() {
+        let env = Env::default();
+        let (client, _admin, player, _house, _balance, _rng) = setup(&env);
+
+        client.place_prediction(&player, &0, &100, &12);
+
+        env.ledger().with_mut(|l| l.sequence_number = ROUND_EXPIRY_LEDGERS + 1);
+
+        client.expire_round(&12);
+
+        // Second call should fail because game is already expired.
+        let result = client.try_expire_round(&12);
         assert!(result.is_err());
     }
 }

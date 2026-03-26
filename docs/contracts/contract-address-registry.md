@@ -131,3 +131,23 @@ pub fn get_admin(env: Env) -> Result<Address, Error>
 
 `Result<Address, Error>`
 
+### `validation_report`
+Performs a validation report of the registry. Flags missing required contracts, duplicate addresses across different aliases, and placeholder records.
+
+```rust
+pub fn validation_report(env: Env) -> Result<ValidationReport, Error>
+```
+
+#### Return Type
+`Result<ValidationReport, Error>`
+
+#### Issue Types
+- **Missing**: A core contract required for the platform (e.g., `prize-pool`) is not registered.
+- **Duplicate**: Multiple contract aliases point to the identical contract address.
+- **Placeholder**: A registered address matches the explicit zero-address placeholder (`C000...`).
+
+#### Operator Guidance
+- **Missing** records should be addressed by deploying the missing contract and registering it.
+- **Duplicate** records may indicate an alias misconfiguration or redundant entries.
+- **Placeholder** records are typically used during initial setup and should be replaced with real contract addresses before production use.
+
