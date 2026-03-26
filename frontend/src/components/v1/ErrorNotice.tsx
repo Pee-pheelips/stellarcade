@@ -10,6 +10,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppError } from '../../types/errors';
 import {
   isBannerDismissed,
+  persistBannerDismissal,
 } from '../../services/global-state-store';
 import {
   ErrorNoticeData,
@@ -163,8 +164,11 @@ export const ErrorNotice: React.FC<ErrorNoticeProps> = ({
   // Handle dismiss action
   const handleDismiss = useCallback(() => {
     setIsVisible(false);
+    if (persistDismissal) {
+      persistBannerDismissal(dismissalKey, resolvedDismissalIdentity, true);
+    }
     onDismiss?.();
-  }, [onDismiss]);
+  }, [onDismiss, persistDismissal, dismissalKey, resolvedDismissalIdentity]);
 
   // Handle retry action
   const handleRetry = useCallback(async () => {
