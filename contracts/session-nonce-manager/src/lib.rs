@@ -183,6 +183,8 @@ impl SessionNonceManagerContract {
     }
 
     /// Return lifecycle and TTL metadata for `(account, purpose, nonce)`.
+    /// The returned status distinguishes active, consumed, revoked, expired,
+    /// and missing nonces.
     pub fn nonce_status(env: Env, account: Address, nonce: u64, purpose: String) -> NonceStatus {
         Self::resolve_nonce_status(&env, &account, nonce, &purpose)
     }
