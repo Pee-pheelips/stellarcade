@@ -17,7 +17,14 @@ const AuditLog = {
    */
   async create(entry) {
     try {
-      const rows = await db('audit_logs').insert(entry).returning('*');
+      const normalizedEntry = {
+        ...entry,
+        metadata:
+          entry.metadata && typeof entry.metadata !== 'string'
+            ? JSON.stringify(entry.metadata)
+            : entry.metadata,
+      };
+      const rows = await db('audit_logs').insert(normalizedEntry).returning('*');
       return rows[0];
     } catch (error) {
       logger.error('Error in AuditLog.create:', error);

@@ -8,13 +8,66 @@ const crypto = require('crypto');
 const AuditLog = require('../models/AuditLog.model');
 const logger = require('../utils/logger');
 
+const REDACTED = '[REDACTED]';
+const SENSITIVE_KEYS = new Set([
+  'password',
+  'secret',
+  'signature',
+  'authorization',
+  'token',
+  'accessToken',
+  'refreshToken',
+  'privateKey',
+  'seed',
+  'mnemonic',
+  'pin',
+]);
+
+const normalizeValue = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(normalizeValue);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = normalizeValue(value[key]);
+        return acc;
+      }, {});
+  }
+
+  return value;
+};
+
+const redactSensitive = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(redactSensitive);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.keys(value).reduce((acc, key) => {
+      if (SENSITIVE_KEYS.has(key)) {
+        acc[key] = REDACTED;
+      } else {
+        acc[key] = redactSensitive(value[key]);
+      }
+      return acc;
+    }, {});
+  }
+
+  return value;
+};
+
+const serializeForHash = (value) => JSON.stringify(normalizeValue(value));
+
 /**
  * Hash sensitive payload data before storing.
  * @param {*} payload
  * @returns {string} SHA-256 hex digest
  */
 const hashPayload = (payload) => {
-  const str = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  const str = typeof payload === 'string' ? payload : serializeForHash(payload);
   return crypto.createHash('sha256').update(str).digest('hex');
 };
 
@@ -43,7 +96,7 @@ const log = async ({ actor, action, target, payload, outcome = 'success', metada
     }
 
     if (metadata) {
-      entry.metadata = JSON.stringify(metadata);
+      entry.metadata = JSON.stringify(redactSensitive(metadata));
     }
 
     await AuditLog.create(entry);
@@ -61,4 +114,10 @@ const list = async ({ actor, action, limit = 50 } = {}) => {
   }
 };
 
-module.exports = { log, list, hashPayload };
+module.exports = {
+  log,
+  list,
+  hashPayload,
+  normalizeValue,
+  redactSensitive,
+};
