@@ -10,6 +10,7 @@ import { ModalStackProvider } from './components/v1/modal-stack';
 import { FeatureFlagsProvider } from './services/feature-flags';
 import CommandPalette, { type Command } from './components/v1/CommandPalette';
 import { BrowserRouter } from 'react-router-dom';
+import { useErrorStore } from './store/errorStore';
 
 const DevContractCallSimulatorPanel = import.meta.env.DEV
   ? lazy(() =>
@@ -18,6 +19,89 @@ const DevContractCallSimulatorPanel = import.meta.env.DEV
       })),
     )
   : undefined;
+
+const toneLabelMap = {
+  success: 'Success',
+  info: 'Info',
+  warning: 'Warning',
+  error: 'Error',
+} as const;
+
+function NotificationCenter(): React.JSX.Element | null {
+  const toasts = useErrorStore((state) => state.toasts);
+  const toastHistory = useErrorStore((state) => state.toastHistory);
+  const dismissToast = useErrorStore((state) => state.dismissToast);
+  const clearToastHistory = useErrorStore((state) => state.clearToastHistory);
+  const [historyOpen, setHistoryOpen] = React.useState(false);
+
+  if (toasts.length === 0 && toastHistory.length === 0) {
+    return null;
+  }
+
+  return (
+    <aside className="toast-center" aria-label="Notifications">
+      <div className="toast-center__stack">
+        {toasts.map((toast) => (
+          <section
+            key={toast.id}
+            className={`toast-center__toast toast-center__toast--${toast.tone}`}
+            role="status"
+            aria-live="polite"
+          >
+            <div className="toast-center__toast-header">
+              <span className="toast-center__tone">{toneLabelMap[toast.tone]}</span>
+              <button
+                type="button"
+                className="toast-center__dismiss"
+                aria-label={`Dismiss ${toast.title}`}
+                onClick={() => dismissToast(toast.id)}
+              >
+                Dismiss
+              </button>
+            </div>
+            <strong className="toast-center__title">{toast.title}</strong>
+            <p className="toast-center__message">{toast.message}</p>
+          </section>
+        ))}
+      </div>
+
+      {toastHistory.length > 0 && (
+        <div className="toast-center__history">
+          <button
+            type="button"
+            className="toast-center__history-toggle"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen((current) => !current)}
+          >
+            {historyOpen ? 'Hide recent notifications' : 'Show recent notifications'}
+          </button>
+          {historyOpen && (
+            <div className="toast-center__history-panel">
+              <div className="toast-center__history-header">
+                <strong>Recent notifications</strong>
+                <button
+                  type="button"
+                  className="toast-center__history-clear"
+                  onClick={clearToastHistory}
+                >
+                  Clear
+                </button>
+              </div>
+              <ul className="toast-center__history-list">
+                {toastHistory.map((toast) => (
+                  <li key={toast.id} className="toast-center__history-item">
+                    <span>{toast.title}</span>
+                    <span>{toast.message}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </aside>
+  );
+}
 
 const AppContent: React.FC = () => {
   const { t } = useI18n();
@@ -41,6 +125,7 @@ const AppContent: React.FC = () => {
   return (
     <div className="app-container">
       <CommandPalette commands={commands} />
+      <NotificationCenter />
       <a href="#main-content" className="skip-link">Skip to main content</a>
       <header className="app-header" role="banner">
         <div className="logo">{t('app.title')}</div>
@@ -65,7 +150,7 @@ const AppContent: React.FC = () => {
         </nav>
         <LocaleSwitcher />
       </header>
-      <Breadcrumbs/>
+      <Breadcrumbs />
       
       <main className="app-content" id="main-content">
         <RouteErrorBoundary>
@@ -95,13 +180,13 @@ const AppContent: React.FC = () => {
 const App: React.FC = () => {
   return (
     <BrowserRouter>
-    <FeatureFlagsProvider>
-      <I18nProvider>
-        <ModalStackProvider>
-          <AppContent />
-        </ModalStackProvider>
-      </I18nProvider>
-    </FeatureFlagsProvider>
+      <FeatureFlagsProvider>
+        <I18nProvider>
+          <ModalStackProvider>
+            <AppContent />
+          </ModalStackProvider>
+        </I18nProvider>
+      </FeatureFlagsProvider>
     </BrowserRouter>
   );
 };
